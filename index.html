@@ -1,0 +1,541 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>30天日出日落與月相查詢（當地時間）</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            background-color: #f4f7f6;
+            color: #333;
+            margin: 0;
+            padding: 20px;
+        }
+        .container {
+            max-width: 950px;
+            margin: 0 auto;
+            background: #fff;
+            padding: 25px;
+            border-radius: 12px;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.05);
+        }
+        h1 {
+            text-align: center;
+            color: #2c3e50;
+            margin-bottom: 10px;
+            font-size: 24px;
+        }
+        .subtitle {
+            text-align: center;
+            color: #7f8c8d;
+            font-size: 14px;
+            margin-bottom: 20px;
+        }
+        .search-box {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 15px;
+            justify-content: center;
+        }
+        input[type="text"] {
+            width: 60%;
+            padding: 10px 15px;
+            border: 1px solid #ccc;
+            border-radius: 6px;
+            font-size: 16px;
+        }
+        button {
+            padding: 10px 20px;
+            background-color: #3498db;
+            color: white;
+            border: none;
+            border-radius: 6px;
+            font-size: 16px;
+            cursor: pointer;
+            transition: background 0.2s;
+        }
+        button:hover {
+            background-color: #2980b9;
+        }
+        .control-panel {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            margin-bottom: 20px;
+            background: #fdfefe;
+            padding: 12px 15px;
+            border-radius: 8px;
+            border: 1px solid #eaeded;
+            gap: 15px;
+            flex-wrap: wrap;
+        }
+        #location-info {
+            text-align: left;
+            font-weight: bold;
+            color: #34495e;
+            font-size: 14px;
+            display: flex;
+            align-items: center;
+        }
+        .right-controls {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+            align-items: flex-end;
+        }
+        .filter-box {
+            font-size: 14px;
+            cursor: pointer;
+        }
+        .filter-box input {
+            transform: scale(1.1);
+            margin-right: 6px;
+            cursor: pointer;
+        }
+        .phase-cell {
+        display: flex;
+        align-items: center;
+        justify-content: flex-start;
+        gap: 6px;
+        width: 11.5em;          /* 固定闊度，令每行的月相圖標上下對齊 */
+        margin: 0 auto;
+        white-space: nowrap;
+    }
+    .legend {
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+            font-size: 12px;
+            align-items: flex-end;
+        }
+        .legend-item {
+            display: flex;
+            align-items: center;
+            gap: 4px;
+        }
+        .color-box {
+            width: 14px;
+            height: 14px;
+            border-radius: 3px;
+        }
+        .table-container {
+            overflow-x: auto;
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 10px;
+            text-align: center;
+        }
+        th, td {
+            padding: 12px 10px;
+            border-bottom: 1px solid #eee;
+            font-size: 14px;
+        }
+        th {
+            background-color: #f8f9fa;
+            color: #2c3e50;
+            font-weight: 600;
+        }
+        /* 「日期」欄右邊、「適合拍攝時段」欄左邊 的垂直分隔線 */
+    th:nth-child(1), td:nth-child(1) { border-right: 2px solid #333; }
+    th:nth-child(7), td:nth-child(7) { border-left: 2px solid #333; }
+    .loading {
+            text-align: center;
+            padding: 40px;
+            font-size: 18px;
+            color: #666;
+        }
+        .error {
+            color: #e74c3c;
+            text-align: center;
+            font-weight: bold;
+        }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <h1>各地日出日落與月相查詢（30天預報）</h1>
+    <div class="subtitle">所有時間均為<b>查詢地當地時間</b></div>
+
+    <div class="search-box">
+        <input type="text" id="locationInput" placeholder="輸入地區名稱 (例如: Tokyo, London, Taipei)，不填則預設當前位置">
+        <button onclick="handleSearch()">查詢</button>
+    </div>
+
+    <div class="control-panel">
+        <div id="location-info">正在載入當前位置資料...</div>
+        <div class="right-controls">
+            <div class="filter-box">
+                <label>
+                    <input type="checkbox" id="astroFilter" checked onchange="applyAstroPostProcess()"> 標示適合星空攝影日子 / 沒有月光影響日子
+                </label>
+            </div>
+            <div class="legend">
+                <div class="legend-item"><div class="color-box" id="swatchDark"></div>深色：整個夜晚都沒有月亮</div>
+                <div class="legend-item"><div class="color-box" id="swatchLight"></div>淺色：夜晚內只有部分時間沒有月亮（見最後一欄）</div>
+                <div class="legend-item" style="color:#7f8c8d;">夜晚 = 日落後 1 小時 ~ 日出前 1 小時（極夜以全日 24 小時計，極晝不適用）</div>
+            </div>
+        </div>
+    </div>
+
+    <div class="table-container">
+        <table id="astroTable" style="display: none;">
+            <thead>
+                <tr>
+                    <th>日期</th>
+                    <th>日出時間</th>
+                    <th>日落時間</th>
+                    <th>月相</th>
+                    <th>月出時間</th>
+                    <th>月落時間</th>
+                    <th>適合拍攝時段</th>
+                </tr>
+            </thead>
+            <tbody id="tableBody">
+                <!-- 動態插入資料 -->
+            </tbody>
+        </table>
+        <div id="loadingDiv" class="loading">資料計算與載入中，請稍候...</div>
+    </div>
+</div>
+
+<script>
+    const DAYS_TO_SHOW = 30;
+
+    // ===== 夜晚範圍 / 判斷門檻 =====
+    // 「夜晚」= 日落後 TWILIGHT_MIN 分鐘 ~ 翌日日出前 TWILIGHT_MIN 分鐘（避開天空仍有餘光的時間）
+    const TWILIGHT_MIN = 60;
+    // 無月時間連續少於這個分鐘數，視為不適合拍攝（不標色、不列出）
+    const MIN_FREE_MIN = 60;
+
+    // ===== 標色主題：'night'（夜空藍）/ 'green'（綠）/ 'yellow'（舊版黃）=====
+    const COLOR_THEME = 'night';
+    const THEMES = {
+        night:  { dark: { bg: '#1f2f56', fg: '#ffffff', border: '#15203d' }, light: { bg: '#dbe6f8', fg: '',        border: '#aebfe0' } },
+        green:  { dark: { bg: '#2e7d32', fg: '#ffffff', border: '#1b5e20' }, light: { bg: '#dcedc8', fg: '',        border: '#aed581' } },
+        yellow: { dark: { bg: '#f39c12', fg: '#ffffff', border: '#d68910' }, light: { bg: '#fcf3cf', fg: '',        border: '#f7dc6f' } }
+    };
+    const THEME = THEMES[COLOR_THEME] || THEMES.night;
+
+    function applyLegendColors() {
+        for (const [id, c] of [['swatchDark', THEME.dark], ['swatchLight', THEME.light]]) {
+            const el = document.getElementById(id);
+            el.style.backgroundColor = c.bg;
+            el.style.border = `1px solid ${c.border}`;
+        }
+    }
+
+    // 全域資料：多抓 1 天（第 31 天），用來判斷「明天」的月出時間
+    let globalAstroResults = [];
+    let globalTzid = '';
+    let globalLat = 0;      // 查詢地緯度：南半球的月亮明暗方向相反
+
+    // ---------- 工具函式 ----------
+
+    // "HH:MM:SS" -> 當日第幾分鐘；無效值（例如 API 回傳 "-----"）-> null
+    function toMin(t) {
+        const m = String(t || '').match(/^(\d{1,2}):(\d{2})/);
+        return m ? Number(m[1]) * 60 + Number(m[2]) : null;
+    }
+
+    // 月相：以「該日日落時」計算，回傳 { key, label }
+    // key 用作標色判斷，label 用作顯示
+    const PHASES = [
+        [0.03, '新月',   '新月 (初一)'],
+        [0.22, '娥眉月', '娥眉月'],
+        [0.28, '上弦月', '上弦月 (初七/八)'],
+        [0.48, '盈凸月', '盈凸月'],
+        [0.53, '滿月',   '滿月 (十五/十六)'],
+        [0.72, '虧凸月', '虧凸月'],
+        [0.78, '下弦月', '下弦月 (廿二/廿三)'],
+        [0.97, '殘月',   '殘月'],
+        [1.01, '新月',   '新月 (初一)']
+    ];
+
+    function getMoonPhase(item) {
+        const synodicMonth = 29.5305877057;
+        const baseUTC = Date.UTC(2000, 0, 6, 18, 14, 0);           // 2000-01-06 18:14 UTC 新月
+        const [y, m, d] = item.date.split('-').map(Number);
+        const sunsetMin = toMin(item.sunset) ?? 18 * 60;
+        const offsetMin = Number(item.utc_offset) || 0;            // 當地時區與 UTC 的分鐘差
+        const t = Date.UTC(y, m - 1, d) + (sunsetMin - offsetMin) * 60000;
+        const days = (t - baseUTC) / 86400000;
+        const p = (((days % synodicMonth) + synodicMonth) % synodicMonth) / synodicMonth;
+        const hit = PHASES.find(x => p < x[0]);
+        return { key: hit[1], label: hit[2], p };
+    }
+
+    // ---------- 資料取得 ----------
+
+    async function getCoordinates(locationName) {
+        if (!locationName || locationName.trim() === "") {
+            try {
+                const res = await fetch('https://ipapi.co/json/');
+                const data = await res.json();
+                if (data.latitude && data.longitude) {
+                    return { lat: data.latitude, lng: data.longitude, name: `${data.city}, ${data.country_name}` };
+                }
+            } catch (e) {
+                console.warn("無法透過 IP 定位，改用預設座標 (香港)");
+            }
+            return { lat: 22.3193, lng: 114.1694, name: "香港 (預設)" };
+        }
+
+        const geoUrl = `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(locationName)}`;
+        const res = await fetch(geoUrl);
+        const data = await res.json();
+        if (data && data.length > 0) {
+            return {
+                lat: parseFloat(data[0].lat),
+                lng: parseFloat(data[0].lon),
+                name: data[0].display_name
+            };
+        } else {
+            throw new Error("找不到該地區，請嘗試更明確的地名。");
+        }
+    }
+
+    async function fetchAstroData(lat, lng) {
+        const now = new Date();
+        const fmt = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+
+        // 多抓「昨天」與「第31天之後」各一天，避免時區差異令「當天」對不上
+        const start = new Date(now); start.setDate(now.getDate() - 1);
+        const end = new Date(now);   end.setDate(now.getDate() + DAYS_TO_SHOW + 1);
+
+        const url = `https://api.sunrisesunset.io/json?lat=${lat}&lng=${lng}&date_start=${fmt(start)}&date_end=${fmt(end)}&time_format=24`;
+        const res = await fetch(url);
+        const data = await res.json();
+
+        if (data.status !== "OK") throw new Error("無法取得天文數據 API 回應錯誤");
+
+        // 「當天」以查詢地的時區為準
+        let todayStr;
+        try {
+            todayStr = new Intl.DateTimeFormat('en-CA', { timeZone: data.tzid }).format(now);
+        } catch (e) {
+            todayStr = fmt(now);
+        }
+        let startIdx = data.results.findIndex(r => r.date === todayStr);
+        if (startIdx < 0) startIdx = 1;
+
+        return {
+            results: data.results.slice(startIdx, startIdx + DAYS_TO_SHOW + 1),
+            tzid: data.tzid
+        };
+    }
+
+    // ---------- 夜晚 / 標色判斷 ----------
+
+    // 分鐘 -> "HH:MM"；超過 24:00 的顯示為「次日 HH:MM」
+    function fmtMin(m) {
+        const next = m > 1440;
+        const mm = next ? m - 1440 : m;
+        return (next ? '次日' : '') + String(Math.floor(mm / 60)).padStart(2, '0') + ':' + String(mm % 60).padStart(2, '0');
+    }
+
+    // 月亮「在天上」的時間段（分鐘，0 = 當日 00:00，1440 = 次日 00:00，最多到 2880）
+    // 用當日 + 明天的月出/月落事件排成時間線：
+    // 第一個事件是月落 → 00:00 時月亮本來就在天上；是月出 → 00:00 時月亮未出
+    function getMoonUpIntervals(item, next) {
+        const ev = [];
+        const add = (src, offset) => {
+            if (!src) return;
+            const r = toMin(src.moonrise), s = toMin(src.moonset);
+            if (r !== null) ev.push({ t: r + offset, type: 'rise' });
+            if (s !== null) ev.push({ t: s + offset, type: 'set' });
+        };
+        add(item, 0);
+        if (next && next !== item) add(next, 1440);
+        ev.sort((a, b) => a.t - b.t);
+        if (ev.length === 0) return [];        // 完全沒有月出/月落 → 當作沒有月亮
+
+        const intervals = [];
+        let up = ev[0].type === 'set';
+        let from = 0;
+        for (const e of ev) {
+            if (e.type === 'rise' && !up) { up = true; from = e.t; }
+            else if (e.type === 'set' && up) { intervals.push([from, e.t]); up = false; }
+        }
+        if (up) intervals.push([from, 2880]);
+        return intervals;
+    }
+
+    // 由 [a, b] 拍攝時段中，扣走月亮在天上的時間，剩下的就是「無月時段」
+    function getFreeSegments(a, b, upIntervals) {
+        let segs = [[a, b]];
+        for (const [us, ue] of upIntervals) {
+            const out = [];
+            for (const [s, e] of segs) {
+                if (ue <= s || us >= e) { out.push([s, e]); continue; }   // 沒有重疊
+                if (us > s) out.push([s, us]);
+                if (ue < e) out.push([ue, e]);
+            }
+            segs = out;
+        }
+        return segs;
+    }
+
+    // 太陽整日不落 / 不升時，判斷是極晝還是極夜（按日期推算太陽赤緯 + 查詢地緯度）
+    // 回傳 'day'（極晝）/ 'night'（極夜）/ null（不在極圈內）
+    function getPolarState(dateStr, lat) {
+        const [y, m, d] = dateStr.split('-').map(Number);
+        const n = Math.round((Date.UTC(y, m - 1, d) - Date.UTC(y, 0, 0)) / 86400000);   // 一年中第幾日
+        const decl = -23.44 * Math.cos((2 * Math.PI / 365) * (n + 10));                   // 太陽赤緯（度）
+        if (Math.abs(lat) < 90 - Math.abs(decl)) return null;
+        return lat * decl > 0 ? 'day' : 'night';
+    }
+
+    // 分析某一行：回傳 { level: 'dark' | 'light' | null, segs: [[開始,結束],...], polar: 'day' | 'night' | null }
+    function analyzeRow(idx) {
+        const item = globalAstroResults[idx];
+        const next = globalAstroResults[idx + 1];
+
+        const sunset = toMin(item.sunset);
+        const nextSunrise = toMin((next || item).sunrise);
+
+        // 夜晚範圍 [a, b]（分鐘，0 = 當日 00:00，大於 1440 = 次日）
+        let a, b, polar = null;
+        if (sunset !== null && nextSunrise !== null) {
+            a = sunset + TWILIGHT_MIN;
+            b = nextSunrise + 1440 - TWILIGHT_MIN;
+        } else {
+            polar = getPolarState(item.date, globalLat);
+            if (polar === 'day') return { level: null, segs: [], polar };   // 極晝：沒有夜晚
+            polar = 'night';                                                // 極夜（或資料缺失）：以整日 24 小時計
+            a = 0;
+            b = 1440;
+        }
+        if (b - a < MIN_FREE_MIN) return { level: null, segs: [], polar };  // 夜晚太短
+
+        const segs = getFreeSegments(a, b, getMoonUpIntervals(item, next))
+            .filter(([s, e]) => e - s >= MIN_FREE_MIN);
+
+        let level = null;
+        if (segs.length === 1 && segs[0][0] === a && segs[0][1] === b) level = 'dark';   // 整晚無月
+        else if (segs.length > 0) level = 'light';                                        // 部分時間無月
+        return { level, segs, polar };
+    }
+
+    // 列表完成後執行的 Post-Process：逐行檢查，符合條件就上色，不符合就忽略
+    function applyAstroPostProcess() {
+        const rows = document.querySelectorAll('#tableBody tr');
+        const isFilterActive = document.getElementById('astroFilter').checked;
+
+        rows.forEach(row => {
+            // 先重置，避免殘留樣式
+            row.style.backgroundColor = '';
+            row.style.color = '';
+            row.style.fontWeight = '';
+
+            if (!isFilterActive) return;
+
+            const { level } = analyzeRow(Number(row.dataset.idx));
+            if (level === 'dark') {
+                row.style.backgroundColor = THEME.dark.bg;
+                row.style.color = THEME.dark.fg;
+                row.style.fontWeight = 'bold';
+            } else if (level === 'light') {
+                row.style.backgroundColor = THEME.light.bg;
+                row.style.color = THEME.light.fg;
+            }
+        });
+    }
+
+    // ---------- 畫面 ----------
+
+    // 月相小圖（SVG）：p = 0~1（0 新月、0.5 滿月），按實際月齡連續繪畫
+    // 北半球：盈月亮右邊、虧月亮左邊；南半球（flip = true）相反
+    function moonSVG(p, flip) {
+        const r = 9, c = 10;
+        const cosT = Math.cos(2 * Math.PI * p);
+        const rx = (Math.abs(cosT) * r).toFixed(2);      // 明暗界線（橢圓）的橫向半徑
+        const sweep = cosT > 0 ? 0 : 1;                   // 月牙 / 凸月 的弧線方向
+        const mirror = (p > 0.5) !== flip;
+        const lit = `M ${c} ${c - r} A ${r} ${r} 0 0 1 ${c} ${c + r} A ${rx} ${r} 0 0 ${sweep} ${c} ${c - r} Z`;
+        return `<svg width="22" height="22" viewBox="0 0 20 20" aria-hidden="true">` +
+               `<circle cx="${c}" cy="${c}" r="${r}" fill="#4a5568"/>` +
+               `<path d="${lit}" fill="#f7e9a8"${mirror ? ` transform="translate(20,0) scale(-1,1)"` : ''}/>` +
+               `<circle cx="${c}" cy="${c}" r="${r}" fill="none" stroke="#8a99a8" stroke-width="0.8"/></svg>`;
+    }
+
+    function phaseCell(item) {
+        const ph = getMoonPhase(item);
+        return `<span class="phase-cell">${moonSVG(ph.p, globalLat < 0)}<span>${ph.label}</span></span>`;
+    }
+
+    function renderTable() {
+        <!-- const show = (t) => (toMin(t) === null ? '無' : t); -->
+        const show = (t) => {
+		    const m = toMin(t);
+		    return m === null ? '無' : fmtMin(m);
+		};
+        const tableBody = document.getElementById('tableBody');
+
+        // 只顯示 30 天（第 31 天只作判斷用）；用 data-idx 記住對應的資料位置
+        tableBody.innerHTML = globalAstroResults.slice(0, DAYS_TO_SHOW).map((item, i) => {
+            const { segs, polar } = analyzeRow(i);
+            let freeText = segs.length
+                ? segs.map(([s, e]) => `${fmtMin(s)}–${fmtMin(e)}`).join(' / ')
+                : '—';
+            if (polar === 'day') freeText = '極晝';
+            else if (polar === 'night') freeText = '極夜　' + freeText;
+            return `<tr data-idx="${i}">
+                <td>${item.date}</td>
+                <td>${show(item.sunrise)}</td>
+                <td>${show(item.sunset)}</td>
+                <td>${phaseCell(item)}</td>
+                <td>${show(item.moonrise)}</td>
+                <td>${show(item.moonset)}</td>
+                <td>${freeText}</td>
+            </tr>`;
+        }).join('');
+
+        applyAstroPostProcess();
+    }
+
+    async function loadData() {
+        const inputVal = document.getElementById('locationInput').value;
+        const loadingDiv = document.getElementById('loadingDiv');
+        const table = document.getElementById('astroTable');
+        const locationInfo = document.getElementById('location-info');
+
+        loadingDiv.style.display = 'block';
+        loadingDiv.className = 'loading';
+        loadingDiv.innerText = '資料計算與載入中，請稍候...';
+        table.style.display = 'none';
+
+        try {
+            const loc = await getCoordinates(inputVal);
+            const astroData = await fetchAstroData(loc.lat, loc.lng);
+            globalAstroResults = astroData.results;
+            globalTzid = astroData.tzid;
+            globalLat = loc.lat;
+
+            locationInfo.innerHTML = `目前顯示地區：${loc.name}<br><span style="font-size: 12px; color: #7f8c8d; font-weight: normal;">時區: ${globalTzid || '自動偵測'}</span>`;
+
+            renderTable();
+            loadingDiv.style.display = 'none';
+            table.style.display = 'table';
+
+        } catch (err) {
+            loadingDiv.className = 'error';
+            loadingDiv.innerText = `發生錯誤：${err.message}`;
+        }
+    }
+
+    function handleSearch() {
+        loadData();
+    }
+
+    window.onload = () => {
+        applyLegendColors();
+        loadData();
+    };
+</script>
+
+</body>
+</html>
