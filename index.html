@@ -141,6 +141,23 @@
         /* 「日期」欄右邊、「適合拍攝時段」欄左邊 的垂直分隔線 */
     th:nth-child(1), td:nth-child(1) { border-right: 2px solid #333; }
     th:nth-child(7), td:nth-child(7) { border-left: 2px solid #333; }
+    .load-more-wrap {
+        display: none;
+        justify-content: flex-end;
+        margin-top: 14px;
+    }
+    .load-more-wrap button {
+        background-color: #ecf0f1;
+        color: #2c3e50;
+        border: 1px solid #dcdfe1;
+    }
+    .load-more-wrap button:hover:not(:disabled) {
+        background-color: #dfe4e6;
+    }
+    .load-more-wrap button:disabled {
+        opacity: 0.6;
+        cursor: default;
+    }
     .loading {
             text-align: center;
             padding: 40px;
@@ -199,11 +216,15 @@
             </tbody>
         </table>
         <div id="loadingDiv" class="loading">資料計算與載入中，請稍候...</div>
+        <div class="load-more-wrap" id="loadMoreWrap">
+            <button id="loadMoreBtn" onclick="extendDays()">+30 天</button>
+        </div>
     </div>
 </div>
 
 <script>
-    const DAYS_TO_SHOW = 30;
+    const DAYS_TO_SHOW = 30;      // 每次查詢 / 每次「+30 天」增加的天數
+    let visibleDays = DAYS_TO_SHOW;  // 目前顯示的天數（換地區查詢會重設為 30）
 
     // ===== 夜晚範圍 / 判斷門檻 =====
     // 「夜晚」= 日落後 TWILIGHT_MIN 分鐘 ~ 翌日日出前 TWILIGHT_MIN 分鐘（避開天空仍有餘光的時間）
@@ -232,6 +253,7 @@
     let globalAstroResults = [];
     let globalTzid = '';
     let globalLat = 0;      // 查詢地緯度：南半球的月亮明暗方向相反
+    let globalLng = 0;
 
     // ---------- 工具函式 ----------
 
@@ -298,26 +320,35 @@
         }
     }
 
-    async function fetchAstroData(lat, lng) {
-        const now = new Date();
-        const fmt = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+    const fmtDate = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+    const parseDate = (s) => { const [y, m, d] = s.split('-').map(Number); return new Date(y, m - 1, d); };
+    const addDays = (d, n) => { const r = new Date(d); r.setDate(r.getDate() + n); return r; };
 
-        // 多抓「昨天」與「第31天之後」各一天，避免時區差異令「當天」對不上
-        const start = new Date(now); start.setDate(now.getDate() - 1);
-        const end = new Date(now);   end.setDate(now.getDate() + DAYS_TO_SHOW + 1);
-
-        const url = `https://api.sunrisesunset.io/json?lat=${lat}&lng=${lng}&date_start=${fmt(start)}&date_end=${fmt(end)}&time_format=24`;
+    // 呼叫 API 取得 [startStr, endStr]（含首尾）的原始資料
+    async function fetchRange(lat, lng, startStr, endStr) {
+        const url = `https://api.sunrisesunset.io/json?lat=${lat}&lng=${lng}&date_start=${startStr}&date_end=${endStr}&time_format=24`;
         const res = await fetch(url);
         const data = await res.json();
-
         if (data.status !== "OK") throw new Error("無法取得天文數據 API 回應錯誤");
+        return data;
+    }
+
+    // 初次查詢：取得由「當地今天」起計 DAYS_TO_SHOW 天 + 1 天緩衝（供計算最後一日的「明天」用）
+    async function fetchAstroData(lat, lng) {
+        const now = new Date();
+
+        // 多抓「昨天」與「第31天之後」一天，避免時區差異令「當天」對不上
+        const start = addDays(now, -1);
+        const end = addDays(now, DAYS_TO_SHOW + 1);
+
+        const data = await fetchRange(lat, lng, fmtDate(start), fmtDate(end));
 
         // 「當天」以查詢地的時區為準
         let todayStr;
         try {
             todayStr = new Intl.DateTimeFormat('en-CA', { timeZone: data.tzid }).format(now);
         } catch (e) {
-            todayStr = fmt(now);
+            todayStr = fmtDate(now);
         }
         let startIdx = data.results.findIndex(r => r.date === todayStr);
         if (startIdx < 0) startIdx = 1;
@@ -326,6 +357,15 @@
             results: data.results.slice(startIdx, startIdx + DAYS_TO_SHOW + 1),
             tzid: data.tzid
         };
+    }
+
+    // "+30 天"：緊接目前資料的最後一天（緩衝日）之後，再取 DAYS_TO_SHOW 天 + 1 天新緩衝
+    async function fetchMoreDays(lat, lng) {
+        const lastStr = globalAstroResults[globalAstroResults.length - 1].date;
+        const start = addDays(parseDate(lastStr), 1);
+        const end = addDays(start, DAYS_TO_SHOW);   // 30 個新的一日 + 沿用上面 start 起計共 31 個日期
+        const data = await fetchRange(lat, lng, fmtDate(start), fmtDate(end));
+        return data.results;
     }
 
     // ---------- 夜晚 / 標色判斷 ----------
@@ -468,15 +508,15 @@
     }
 
     function renderTable() {
-        <!-- const show = (t) => (toMin(t) === null ? '無' : t); -->
+        // 只顯示 HH:MM（API 回傳 HH:MM:SS，秒數不需要）；沒有時間則顯示「無」
         const show = (t) => {
-		    const m = toMin(t);
-		    return m === null ? '無' : fmtMin(m);
-		};
+            const m = toMin(t);
+            return m === null ? '無' : fmtMin(m);
+        };
         const tableBody = document.getElementById('tableBody');
 
         // 只顯示 30 天（第 31 天只作判斷用）；用 data-idx 記住對應的資料位置
-        tableBody.innerHTML = globalAstroResults.slice(0, DAYS_TO_SHOW).map((item, i) => {
+        tableBody.innerHTML = globalAstroResults.slice(0, visibleDays).map((item, i) => {
             const { segs, polar } = analyzeRow(i);
             let freeText = segs.length
                 ? segs.map(([s, e]) => `${fmtMin(s)}–${fmtMin(e)}`).join(' / ')
@@ -514,16 +554,40 @@
             globalAstroResults = astroData.results;
             globalTzid = astroData.tzid;
             globalLat = loc.lat;
+            globalLng = loc.lng;
+            visibleDays = DAYS_TO_SHOW;   // 換地區查詢，重設回 30 天
+            document.getElementById('loadMoreBtn').disabled = false;
+            document.getElementById('loadMoreBtn').innerText = '+30 天';
 
             locationInfo.innerHTML = `目前顯示地區：${loc.name}<br><span style="font-size: 12px; color: #7f8c8d; font-weight: normal;">時區: ${globalTzid || '自動偵測'}</span>`;
 
             renderTable();
             loadingDiv.style.display = 'none';
             table.style.display = 'table';
+            document.getElementById('loadMoreWrap').style.display = 'flex';
 
         } catch (err) {
             loadingDiv.className = 'error';
             loadingDiv.innerText = `發生錯誤：${err.message}`;
+            document.getElementById('loadMoreWrap').style.display = 'none';
+        }
+    }
+
+    // "+30 天" 按鈕：延續目前查詢地，追加 30 天，不重新查詢地區
+    async function extendDays() {
+        const btn = document.getElementById('loadMoreBtn');
+        btn.disabled = true;
+        btn.innerText = '載入中...';
+        try {
+            const more = await fetchMoreDays(globalLat, globalLng);
+            globalAstroResults = globalAstroResults.concat(more);
+            visibleDays += DAYS_TO_SHOW;
+            renderTable();
+        } catch (err) {
+            alert(`發生錯誤：${err.message}`);
+        } finally {
+            btn.disabled = false;
+            btn.innerText = '+30 天';
         }
     }
 
